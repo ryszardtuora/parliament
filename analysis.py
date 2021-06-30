@@ -15,10 +15,8 @@ with open("speeches.txt") as f:
 # CONSTRUCTING THE DF
 speeches = txt.split("\n\n")
 speech_objs = []
-authors = []
 for speech in speeches:
   author, text = speech.split("\n", 1)
-  authors.append(author)
   try:
     party = deputies[author]
     obj = {"author": author, "party": party, "text": text}
@@ -29,9 +27,7 @@ for speech in speeches:
 
 df = pandas.DataFrame(speech_objs)
 
-#ŁĄĆZYĆ PRZERWANE WYSTĄPIENIA
-# CZASEM ZDARZA SIĘ TRASH df[100]
-# BASIC STATISTICS
+#BASIC STATISTICS
 df.party.value_counts()
 df.author.value_counts()
 df["text"].apply(len).describe()
@@ -42,8 +38,7 @@ from collections import Counter
 from sklearn.feature_extraction.text import CountVectorizer
 cv = CountVectorizer()
 embedding = cv.fit_transform(df["text"])
-dense = embedding.toarray()
-freqs = dense.sum(axis=0)
+freqs = numpy.array(embedding.sum(axis=0)).squeeze()
 feature_names = cv.get_feature_names()
 fqdict = Counter({word:freq for word, freq in zip(feature_names, freqs)})
 
@@ -52,67 +47,57 @@ fqdict = Counter({word:freq for word, freq in zip(feature_names, freqs)})
 from sklearn.feature_extraction.text import TfidfTransformer
 model = TfidfTransformer(sublinear_tf=True)
 tfidf = model.fit_transform(embedding) 
-tfidf_dense = tfidf.toarray()
-srt = tfidf_dense.argsort()
-keywords = [[feature_names[i] for i in row[-5:]] for row in srt]
+keywords = []
+for row in tfidf:
+    dense_row = row.toarray().squeeze()
+    srt = dense_row.argsort()
+    top_5 = [feature_names[i] for i in srt[-5:]]
+    keywords.append(top_5)
+
 
 # VISUALIZATION
 from matplotlib import pyplot as plt
+from matplotlib import cm
 from sklearn.decomposition import TruncatedSVD
 dim_reductor = TruncatedSVD(n_components=2)
-reduced = dim_reductor.fit_transform(tfidf)
-transposed = reduced.T
-party_list = list(set(df["party"]))
-scatterplot = plt.scatter(*transposed, [party_list.index(p) for p in df["party"]])
+reduced = pandas.DataFrame(dim_reductor.fit_transform(tfidf), columns=["X", "Y"])
+ndf = pandas.concat([df, reduced], axis=1)
+fig, ax = plt.subplots()
+for i, party in enumerate(ndf["party"].unique()):
+    party_entries = ndf[ndf["party"]==party]
+    X, Y = party_entries.X, party_entries.Y
+    ax.scatter(X, Y, c=cm.Accent(i), label=party)
+
+ax.legend()
 plt.show()
+
+explained_variance = dim_reductor.explained_variance_ratio_
 
 # CLUSTERING
 from sklearn.cluster import KMeans
-
-parties = list(set([s["party"] for s in speech_objs]))
-party_labels = [parties.index(s["party"]) for s in speech_objs]
-
-km = KMeans(n_clusters = 5)
+NUM_CLUSTERS = 10
+km = KMeans(n_clusters = NUM_CLUSTERS)
 clusters = km.fit_predict(tfidf)
+cluster_frequency = Counter(clusters)
 
-from sklearn.metrics import confusion_matrix
-conf_matr = confusion_matrix(clusters, party_labels)
+cluster_keywords = []
+for cluster_index in range(NUM_CLUSTERS):
+    indices = [i for i, c in enumerate(clusters) if c == cluster_index]
+    cluster_counter = Counter()
+    for i in indices:
+        cluster_counter.update(keywords[i])
+    top_10 = cluster_counter.most_common(10)
+    cluster_keywords.append(top_10)
 
-# wyszukiwarka Okapi BM25
-# LSA
-# stopwords z flisty
-# lemmatize by morfeusz
-# najblizsi sasiedzi po odleglosci
-from sklearn.decomposition import TruncatedSVD
 
-n_topics = 100
-svd = TruncatedSVD(n_components=n_topics, random_state = SEED)
-reduced = svd.fit_transform(tfidf)
-explained_variance = svd.explained_variance_ratio_.sum()# czy na pewno ratio
 
-srt = sorted([(reduced[i][0], i) for i in range(reduced.shape[0])], reverse=True)
-
-#po klastrach counter albo sumować
-#po partiach counter albo sumować
-#klastry warto jednak narysować na wykresie
-# dataframe
- df,group_by("party").sum()
-ddf = DataFrame(array, columns=feature_names)
-
-#PARTY KEYWORDS
-top_labels = [f"top_{i}" for i in range(5,0,-1)]
-ndf = pandas.concat([df, DataFrame(srt[:,-5:], columns=top_labels)], axis=1)
-grouped = ndf.groupby("party")
-aggregator = {
-        f"top_{i}": Counter for i in range(5,0,-1)
-}
-aggred = grouped.agg(aggregator)
-joined = {}
-for party, entries in aggred.iterrows():
-  joined[party] = Counter()
-  for entry in entries:
-    joined[party].update(entry)
-  top_kws = [feature_names[i] for i, f in joined[party].most_common(5)]
-  joined[party] = top_kws
-
+# PARTY KEYWORDS 
+party_keywords = {} 
+keywords_df = pandas.DataFrame(keywords, columns=[f"top_{i}" for i in range(5,0,-1)])
+ndf = pandas.concat([df, keywords_df], axis=1)
+for party in ndf["party"].unique():
+    party_entries = ndf[ndf["party"]==party]
+    aggregated = pandas.concat([party_entries.loc[:,f"top_{i}"] for i in range(5,0,-1)])
+    top10 = aggregated.value_counts().iloc[:10]
+    party_keywords[party] = top10
 

@@ -3,12 +3,13 @@ from bs4 import BeautifulSoup
 from bs4.element import Tag
 import re
 
+
 page1 = "https://www.sejm.gov.pl/sejm9.nsf/wypowiedzi.xsp"
 page2 = "https://www.sejm.gov.pl/sejm9.nsf/wypowiedzi.xsp?page=2"
 main_address = "https://www.sejm.gov.pl/sejm9.nsf/"
-
 interj_regex = re.compile(r"\([^\)]+\)")
 whitespace_regex = re.compile(r"\s+")
+author_regex = re.compile(r"(Poseł (Sprawozdawca)?)|(\(tekst niewygłoszony\))|:")
 
 seating_links = []
 for page in [page1, page2]:
@@ -48,10 +49,12 @@ for i, sp in enumerate(speech_links):
 cleaned_speeches = []
 for speech in speeches:
     author, speech_text = speech.split("\n", 1)
-    interj_cleaned = interj_regex.sub("", speech_text)
+    clean_author = author_regex.sub("", author).strip()
+    author_removed = speech_text.replace(author, "")
+    interj_cleaned = interj_regex.sub("", author_removed)
     whitespace_cleaned = whitespace_regex.sub(" ", interj_cleaned)
     three_dots_cleaned = whitespace_cleaned.replace("... ...", " ")
-    clean_speech = "\n".join([author, three_dots_cleaned])
+    clean_speech = "\n".join([clean_author, three_dots_cleaned])
     cleaned_speeches.append(clean_speech)
 
 full_text = "\n\n".join(cleaned_speeches)
